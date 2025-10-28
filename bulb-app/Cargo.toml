@@ -1,0 +1,14 @@
+[package]
+name = "bulb-app"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "bulb-app"
+path = "src/main.rs"
+
+[dependencies]
+bulb-core = { path = "../bulb-core" }
+midir = "0.10.3"
+tokio = { workspace = true }
+anyhow = { workspace = true }
