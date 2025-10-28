@@ -1,5 +1,5 @@
 [workspace]
-members = ["bulb-core", "bulb-app", "bulb-vst"]
+members = ["bulb-core", "bulb-app", "bulb-vst", "xtask"]
 resolver = "2"
 
 [workspace.dependencies]
