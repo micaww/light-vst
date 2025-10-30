@@ -66,22 +66,32 @@ impl BulbController {
         self.send_commands(dps).await
     }
 
-    /// Send commands to the bulb
-    pub async fn send_commands(&mut self, dps: HashMap<String, serde_json::Value>) -> Result<()> {
+    fn create_payload(&self, dps: &HashMap<String, serde_json::Value>) -> Payload {
         let current_time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)?
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
             .as_secs() as u32;
 
-        let payload = Payload::Struct(PayloadStruct {
+        Payload::Struct(PayloadStruct {
             dev_id: self.device_id.clone(),
             gw_id: Some(self.device_id.clone()),
             uid: None,
             t: Some(current_time.to_string()),
             dp_id: None,
-            dps: Some(serde_json::to_value(&dps)?),
-        });
+            dps: Some(serde_json::to_value(dps).unwrap()),
+        })
+    }
 
-        self.device.set(payload).await?;
+    /// Send commands to the bulb
+    /// Automatically reconnects and retries once if the command fails
+    pub async fn send_commands(&mut self, dps: HashMap<String, serde_json::Value>) -> Result<()> {
+        if let Err(_) = self.device.set(self.create_payload(&dps)).await {
+            println!("Reconnecting to bulb...");
+            // connection likely failed or was dropped. reconnect and try again
+            self.connect().await?;
+            println!("Reconnected. Retrying command...");
+            self.device.set(self.create_payload(&dps)).await?;
+        }
 
         Ok(())
     }

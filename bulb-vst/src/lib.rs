@@ -157,34 +157,34 @@ fn bulb_controller_thread(command_rx: Receiver<BulbCommand>) {
     let rt = tokio::runtime::Runtime::new().unwrap();
 
     rt.block_on(async {
-        let mut controller: Option<BulbController> = None;
-
-        let default_config = BulbConfig::new(
+        let mut controller = BulbController::new(BulbConfig::new(
             "eb052a1de220394996xwke",
             "!BY}~:dab1nuT;'n",
             "192.168.0.124",
             "3.3",
-        );
+        )).unwrap();
 
-        match BulbController::new(default_config) {
-            Ok(mut ctrl) => {
-                if ctrl.connect().await.is_ok() {
-                    controller = Some(ctrl);
-                    nih_log!("Bulb connected successfully");
-                } else {
-                    nih_error!("Failed to connect to bulb");
-                }
-            }
-            Err(e) => {
-                nih_error!("Failed to create bulb controller: {}", e);
-            }
+        if controller.connect().await.is_ok() {
+            nih_log!("Bulb connected successfully");
+        } else {
+            nih_error!("Failed to connect to bulb");
         }
 
         while let Ok(command) = command_rx.recv() {
-            if let Some(ref mut ctrl) = controller {
-                match command {
-                    BulbCommand::SetHSV(hue, saturation, brightness) => {
-                        ctrl.set_color(hue, saturation, brightness).await.ok();
+            match command {
+                BulbCommand::SetHSV(hue, saturation, brightness) => {
+                    match controller.set_color(hue, saturation, brightness).await {
+                        Ok(_) => {
+                            nih_log!(
+                                "Set bulb color to H:{} S:{} B:{}",
+                                hue,
+                                saturation,
+                                brightness
+                            );
+                        }
+                        Err(e) => {
+                            nih_error!("Failed to set bulb color: {}", e);
+                        }
                     }
                 }
             }
