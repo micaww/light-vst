@@ -4,19 +4,26 @@ use nih_plug::prelude::*;
 use std::sync::Arc;
 
 enum BulbCommand {
-    SetHue(u16)
+    SetHSV(u16, u16, u16),
 }
 
 pub struct BulbVst {
     params: Arc<BulbVstParams>,
     command_tx: Sender<BulbCommand>,
     _bulb_thread: Option<std::thread::JoinHandle<()>>,
+    last_hue: u16,
+    last_saturation: u16,
+    last_brightness: u16,
 }
 
 #[derive(Params)]
 struct BulbVstParams {
     #[id = "hue"]
     pub hue: FloatParam,
+    #[id = "saturation"]
+    pub saturation: FloatParam,
+    #[id = "brightness"]
+    pub brightness: FloatParam,
 }
 
 impl Default for BulbVst {
@@ -32,6 +39,9 @@ impl Default for BulbVst {
             params: Arc::new(BulbVstParams::default()),
             command_tx,
             _bulb_thread: Some(bulb_thread),
+            last_hue: u16::MAX,
+            last_saturation: u16::MAX,
+            last_brightness: u16::MAX,
         }
     }
 }
@@ -57,6 +67,42 @@ impl Default for BulbVstParams {
                     .ok()
                     .map(|degrees| degrees / 360.0)
             })),
+            saturation: FloatParam::new(
+                "Saturation",
+                0.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 1.0,
+                },
+            )
+            .with_unit("%")
+            .with_value_to_string(Arc::new(|value| {
+                format!("{:.0}", value * 100.0)
+            }))
+            .with_string_to_value(Arc::new(|string| {
+                string.trim_end_matches("%")
+                    .parse::<f32>()
+                    .ok()
+                    .map(|degrees| degrees / 100.0)
+            })),
+            brightness: FloatParam::new(
+                "Brightness",
+                0.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 1.0,
+                },
+            )
+            .with_unit("%")
+            .with_value_to_string(Arc::new(|value| {
+                format!("{:.0}", value * 100.0)
+            }))
+            .with_string_to_value(Arc::new(|string| {
+                string.trim_end_matches("%")
+                    .parse::<f32>()
+                    .ok()
+                    .map(|degrees| degrees / 100.0)
+            })),
         }
     }
 }
@@ -77,7 +123,6 @@ impl Plugin for BulbVst {
         names: PortNames::const_default(),
     }];
 
-    const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
     type SysExMessage = ();
@@ -91,27 +136,17 @@ impl Plugin for BulbVst {
         &mut self,
         _buffer: &mut Buffer,
         _aux: &mut AuxiliaryBuffers,
-        context: &mut impl ProcessContext<Self>,
+        _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        // process midi events
-        while let Some(event) = context.next_event() {
-            match event {
-                NoteEvent::MidiCC {
-                    timing: _,
-                    channel: _,
-                    cc,
-                    value,
-                } => {
-                    // mod wheel
-                    if cc == 1 {
-                        let midi_value = (value * 127.0) as u8;
-                        let hue = bulb_core::midi_to_hue(midi_value);
+        let hue = (self.params.hue.value() * 360.0) as u16;
+        let saturation = (self.params.saturation.value() * 1000.0) as u16;
+        let brightness = (self.params.brightness.value() * 1000.0) as u16;
 
-                        let _ = self.command_tx.try_send(BulbCommand::SetHue(hue));
-                    }
-                }
-                _ => {}
-            }
+        if hue != self.last_hue || saturation != self.last_saturation || brightness != self.last_brightness {
+            self.last_hue = hue;
+            self.last_saturation = saturation;
+            self.last_brightness = brightness;
+            self.command_tx.send(BulbCommand::SetHSV(hue, saturation, brightness)).ok();
         }
 
         ProcessStatus::Normal
@@ -123,7 +158,6 @@ fn bulb_controller_thread(command_rx: Receiver<BulbCommand>) {
 
     rt.block_on(async {
         let mut controller: Option<BulbController> = None;
-        let mut last_hue: Option<u16> = None;
 
         let default_config = BulbConfig::new(
             "eb052a1de220394996xwke",
@@ -135,8 +169,6 @@ fn bulb_controller_thread(command_rx: Receiver<BulbCommand>) {
         match BulbController::new(default_config) {
             Ok(mut ctrl) => {
                 if ctrl.connect().await.is_ok() {
-                    // initialize to green
-                    let _ = ctrl.set_color(120, 1000, 1000).await;
                     controller = Some(ctrl);
                     nih_log!("Bulb connected successfully");
                 } else {
@@ -149,20 +181,10 @@ fn bulb_controller_thread(command_rx: Receiver<BulbCommand>) {
         }
 
         while let Ok(command) = command_rx.recv() {
-            match command {
-                BulbCommand::SetHue(hue) => {
-                    if last_hue != Some(hue) {
-                        if let Some(ref mut ctrl) = controller {
-                            match ctrl.set_color(hue, 1000, 1000).await {
-                                Ok(_) => {
-                                    last_hue = Some(hue);
-                                    nih_trace!("Set bulb hue to {}", hue);
-                                }
-                                Err(e) => {
-                                    nih_error!("Failed to set bulb color: {}", e);
-                                }
-                            }
-                        }
+            if let Some(ref mut ctrl) = controller {
+                match command {
+                    BulbCommand::SetHSV(hue, saturation, brightness) => {
+                        ctrl.set_color(hue, saturation, brightness).await.ok();
                     }
                 }
             }
