@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
 
     tokio::spawn(async move {
         while let Some(hue) = rx.recv().await {
-            if let Err(e) = controller.set_color(hue, 1000, 1000).await {
+            if let Err(e) = controller.set_color(hue, 1000, 1000, true).await {
                 eprintln!("Error setting bulb color: {}", e);
             }
         }

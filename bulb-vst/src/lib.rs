@@ -4,7 +4,7 @@ use nih_plug::prelude::*;
 use std::sync::Arc;
 
 enum BulbCommand {
-    SetHSV(u16, u16, u16),
+    SetHSV(u16, u16, u16, bool),
 }
 
 pub struct BulbVst {
@@ -24,6 +24,8 @@ struct BulbVstParams {
     pub saturation: FloatParam,
     #[id = "brightness"]
     pub brightness: FloatParam,
+    #[id = "immediate"]
+    pub immediate: BoolParam,
 }
 
 impl Default for BulbVst {
@@ -103,6 +105,7 @@ impl Default for BulbVstParams {
                     .ok()
                     .map(|degrees| degrees / 100.0)
             })),
+            immediate: BoolParam::new("Immediate", true),
         }
     }
 }
@@ -141,12 +144,13 @@ impl Plugin for BulbVst {
         let hue = (self.params.hue.value() * 360.0) as u16;
         let saturation = (self.params.saturation.value() * 1000.0) as u16;
         let brightness = (self.params.brightness.value() * 1000.0) as u16;
+        let immediate = self.params.immediate.value();
 
         if hue != self.last_hue || saturation != self.last_saturation || brightness != self.last_brightness {
             self.last_hue = hue;
             self.last_saturation = saturation;
             self.last_brightness = brightness;
-            self.command_tx.send(BulbCommand::SetHSV(hue, saturation, brightness)).ok();
+            self.command_tx.send(BulbCommand::SetHSV(hue, saturation, brightness, immediate)).ok();
         }
 
         ProcessStatus::Normal
@@ -172,8 +176,8 @@ fn bulb_controller_thread(command_rx: Receiver<BulbCommand>) {
 
         while let Ok(command) = command_rx.recv() {
             match command {
-                BulbCommand::SetHSV(hue, saturation, brightness) => {
-                    match controller.set_color(hue, saturation, brightness).await {
+                BulbCommand::SetHSV(hue, saturation, brightness, immediate) => {
+                    match controller.set_color(hue, saturation, brightness, immediate).await {
                         Ok(_) => {
                             nih_log!(
                                 "Set bulb color to H:{} S:{} B:{}",

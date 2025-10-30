@@ -58,10 +58,13 @@ impl BulbController {
     /// h - Hue (0-360)
     /// s - Saturation (0-1000)
     /// v - Brightness (0-1000)
-    pub async fn set_color(&mut self, h: u16, s: u16, v: u16) -> Result<()> {
+    /// immediate - If true, set the color immediately without transition
+    pub async fn set_color(&mut self, h: u16, s: u16, v: u16, immediate: bool) -> Result<()> {
+        let immediate_num = if immediate { 0 } else { 1 };
+
         let mut dps = HashMap::new();
         dps.insert("20".to_string(), json!(true)); // make sure it's on
-        dps.insert("28".to_string(), json!(format!("0{}00000000", hsv_to_hex(h, s, v)))); // real time set color to avoid gradient transition
+        dps.insert("28".to_string(), json!(format!("{}{}00000000", immediate_num, hsv_to_hex(h, s, v)))); // real time set color to avoid gradient transition
 
         self.send_commands(dps).await
     }
